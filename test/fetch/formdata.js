@@ -254,6 +254,22 @@ test('formData forEach', async (t) => {
       t.assert.strictEqual(this, thisArg)
     }, thisArg)
   })
+
+  await t.test('observes entries added or removed by the callback', (t) => {
+    const fd = new FormData()
+    fd.append('a', '1')
+    fd.append('b', '2')
+    fd.append('c', '3')
+    const seen = []
+    fd.forEach((value, key) => {
+      seen.push([key, value])
+      if (key === 'a') {
+        fd.delete('b')
+        fd.append('d', '4')
+      }
+    })
+    t.assert.deepStrictEqual(seen, [['a', '1'], ['c', '3'], ['d', '4']])
+  })
 })
 
 test('formData toStringTag', (t) => {

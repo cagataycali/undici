@@ -34,3 +34,30 @@ Breaking changes: none. Both functions return identical values for every input (
 Overlap: P36 (`perf/cache-trimows-no-regex`) and P38 also touch `lib/util/cache.js`. This diff comes straight from `origin/main` and is independent of theirs; if they land first, a trivial rebase may be needed.
 
 AI assistance: this change was researched and drafted with AI (tiny / Claude) and reviewed by the author.
+
+## Re-verified (rotated load order)
+
+Re-run 2026-11-17 after finding that in one process the last-loaded undici copy can run 20–30% slower whatever its code. A and A' are two separate extracted copies of base `3d170a33`'s tree, B is this branch. Each call cycles through the same 5 inputs. Each load order runs in its own process (3 orders × 2 processes, 9 alternating rounds × 200k calls, median ns/call), under the bench lock (loadavg 4.4). Node v26.13.0, darwin arm64. The gain holds in every order and A/A stays within ±1.6%.
+
+### parseVaryHeader
+| order | A (base) | A' (base copy) | B (patch) | A'/A | B/A |
+|---|---|---|---|---|---|
+| A,B,A2 | 220.8 | 223.3 | 158.5 | +1.1% | -28.2% |
+| A,B,A2 | 222.6 | 225.8 | 161.7 | +1.4% | -27.4% |
+| B,A2,A | 225.1 | 227.4 | 157.7 | +1.0% | -29.9% |
+| B,A2,A | 225.8 | 223.6 | 159.2 | -1.0% | -29.5% |
+| A2,A,B | 220.6 | 222.7 | 156.6 | +1.0% | -29.0% |
+| A2,A,B | 223.0 | 220.8 | 156.7 | -1.0% | -29.7% |
+| **geo-mean over orders** | | | | **+0.4%** | **-29.1%** vs mean(A,A') |
+
+### isInvalidOrWildcardVaryHeader
+| order | A (base) | A' (base copy) | B (patch) | A'/A | B/A |
+|---|---|---|---|---|---|
+| A,B,A2 | 295.2 | 300.0 | 113.3 | +1.6% | -61.6% |
+| A,B,A2 | 296.3 | 294.5 | 112.5 | -0.6% | -62.0% |
+| B,A2,A | 300.6 | 298.2 | 111.7 | -0.8% | -62.8% |
+| B,A2,A | 297.5 | 300.3 | 115.3 | +0.9% | -61.3% |
+| A2,A,B | 293.7 | 291.1 | 109.9 | -0.9% | -62.6% |
+| A2,A,B | 301.7 | 298.9 | 114.8 | -0.9% | -61.9% |
+| **geo-mean over orders** | | | | **-0.1%** | **-62.0%** vs mean(A,A') |
+

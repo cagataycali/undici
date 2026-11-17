@@ -37,3 +37,30 @@ also edit `lib/web/fetch/request.js` (the `Request` constructor); this diff touc
 independent of them, so at most a trivial rebase.
 
 AI assistance: this change was researched and drafted with AI (tiny / Claude) and reviewed by the author.
+
+## Re-verified (rotated load order)
+
+Re-run 2026-11-17 after finding that in one process the last-loaded undici copy can run 20–30% slower whatever its code. A and A' are two separate extracted copies of base `3d170a33`, B is this branch. Each load order runs in its own process (3 orders × 2 processes, 9 alternating rounds × 200k ops, median ns/op), under the bench lock (loadavg 5.8). Node v26.13.0, darwin arm64. The gain holds in every order.
+
+### cloneRequest(req)
+| order | A (base) | A' (base copy) | B (patch) | A'/A | B/A |
+|---|---|---|---|---|---|
+| A,B,A2 | 130.1 | 140.4 | 91.5 | +7.9% | -29.7% |
+| A,B,A2 | 163.5 | 163.3 | 106.0 | -0.1% | -35.1% |
+| B,A2,A | 151.1 | 153.8 | 98.9 | +1.8% | -34.5% |
+| B,A2,A | 161.1 | 154.9 | 105.7 | -3.8% | -34.4% |
+| A2,A,B | 170.0 | 167.0 | 110.9 | -1.8% | -34.8% |
+| A2,A,B | 171.2 | 168.6 | 111.4 | -1.5% | -34.9% |
+| **geo-mean over orders** | | | | **+0.3%** | **-34.1%** vs mean(A,A') |
+
+### null-body clone path
+| order | A (base) | A' (base copy) | B (patch) | A'/A | B/A |
+|---|---|---|---|---|---|
+| A,B,A2 | 213.3 | 217.6 | 98.5 | +2.0% | -53.8% |
+| A,B,A2 | 226.2 | 223.8 | 103.5 | -1.1% | -54.3% |
+| B,A2,A | 225.4 | 211.6 | 98.9 | -6.1% | -56.1% |
+| B,A2,A | 232.5 | 233.0 | 109.2 | +0.2% | -53.0% |
+| A2,A,B | 227.1 | 227.6 | 106.1 | +0.2% | -53.3% |
+| A2,A,B | 253.1 | 252.5 | 121.6 | -0.2% | -51.9% |
+| **geo-mean over orders** | | | | **-0.9%** | **-53.6%** vs mean(A,A') |
+

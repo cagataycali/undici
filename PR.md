@@ -41,3 +41,30 @@ Breaking changes: none — internal-only; the request object produced by step 12
 defaults as before, and no public API, error, or spec-visible behaviour changes.
 
 AI assistance: this change was researched and drafted with AI (tiny / Claude) and reviewed by the author.
+
+## Re-verified (rotated load order)
+
+Re-run 2026-11-17 after finding that in one process the last-loaded undici copy can run 20–30% slower whatever its code. A and A' are two separate extracted copies of base `e2d3523b`, B is this branch. Each load order runs in its own process (3 orders × 2 processes, 9 alternating rounds × 50k ops, median ns/op), under the bench lock (loadavg 4.9). Node v26.13.0, darwin arm64. The bias shows plainly here: the last-loaded copy is 9–15% slower in each order, so per-order deltas swing. Averaged over orders: `new Request(url)` holds at **−22%**, in line with the original −23%. The POST+headers case averages **−7%** (A/A −1%), but in the order where the patch loads last it is only −3% / +0.1%, so treat its gain as modest (~5–7%).
+
+### new Request(url)
+| order | A (base) | A' (base copy) | B (patch) | A'/A | B/A |
+|---|---|---|---|---|---|
+| A,B,A2 | 240.5 | 276.9 | 188.7 | +15.1% | -21.6% |
+| A,B,A2 | 265.2 | 310.6 | 212.6 | +17.1% | -19.8% |
+| B,A2,A | 299.9 | 264.6 | 196.5 | -11.8% | -34.5% |
+| B,A2,A | 307.4 | 268.4 | 201.9 | -12.7% | -34.3% |
+| A2,A,B | 269.0 | 267.3 | 244.5 | -0.6% | -9.1% |
+| A2,A,B | 268.6 | 267.5 | 243.6 | -0.4% | -9.3% |
+| **geo-mean over orders** | | | | **+0.5%** | **-22.4%** vs mean(A,A') |
+
+### new Request(url, { method: 'POST', headers })
+| order | A (base) | A' (base copy) | B (patch) | A'/A | B/A |
+|---|---|---|---|---|---|
+| A,B,A2 | 614.0 | 655.0 | 568.9 | +6.7% | -7.3% |
+| A,B,A2 | 650.7 | 684.4 | 597.1 | +5.2% | -8.2% |
+| B,A2,A | 673.9 | 621.5 | 593.3 | -7.8% | -12.0% |
+| B,A2,A | 673.4 | 635.6 | 573.7 | -5.6% | -14.8% |
+| A2,A,B | 652.8 | 639.2 | 633.2 | -2.1% | -3.0% |
+| A2,A,B | 620.6 | 604.0 | 621.0 | -2.7% | +0.1% |
+| **geo-mean over orders** | | | | **-1.2%** | **-7.2%** vs mean(A,A') |
+

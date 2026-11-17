@@ -295,3 +295,37 @@ test('clone body garbage collection', async (t) => {
   const cloneBody = ref.deref()
   t.assert.strictEqual(cloneBody, undefined, 'clone body was not garbage collected')
 })
+
+test('arrayBuffer() returns an ArrayBuffer that is not shared with other memory', async (t) => {
+  // Small bodies are concatenated into Buffers that may live in Node's shared
+  // pool (#3337); large bodies get their own ArrayBuffer.
+  for (const length of [0, 1, 100, 4095, 4096, 4097, 65536, 131072]) {
+    const source = Buffer.alloc(length, 7)
+
+    const chunked = new ReadableStream({
+      start (controller) {
+        controller.enqueue(source.subarray(0, length >> 1))
+        controller.enqueue(source.subarray(length >> 1))
+        controller.close()
+      }
+    })
+
+    for (const body of [source, chunked]) {
+      const ab = await new Response(body).arrayBuffer()
+      t.assert.ok(ab instanceof ArrayBuffer)
+      t.assert.strictEqual(ab.byteLength, length)
+      t.assert.deepStrictEqual(Buffer.from(ab), source)
+
+      // Writing into the result must not touch the source or any other buffer.
+      new Uint8Array(ab).fill(1)
+      t.assert.ok(source.every((b) => b === 7))
+    }
+  }
+
+  // Two small reads must not share an ArrayBuffer.
+  const a = await new Response('a').arrayBuffer()
+  const b = await new Response('b').arrayBuffer()
+  t.assert.notStrictEqual(a, b)
+  t.assert.strictEqual(a.byteLength, 1)
+  t.assert.strictEqual(b.byteLength, 1)
+})

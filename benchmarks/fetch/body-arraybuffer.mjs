@@ -4,7 +4,8 @@ import { Response } from '../../lib/web/fetch/response.js'
 const settings = {
   small: 2 << 8,
   middle: 2 << 12,
-  long: 2 << 16
+  long: 2 << 16,
+  large: 1 << 20
 }
 
 for (const [name, length] of Object.entries(settings)) {

@@ -228,6 +228,29 @@ describe('constructing a Response with a ReadableStream body', () => {
     await t.assert.rejects(response3.json(), TypeError)
     await t.assert.rejects(response4.blob(), TypeError)
   })
+
+  test('single chunk that is a view into a larger buffer', async (t) => {
+    // BOM + JSON, surrounded by bytes that must not leak into the result
+    const backing = Buffer.from('xx\uFEFF{"foo":"bar"}yy')
+    const chunk = new Uint8Array(backing.buffer, backing.byteOffset + 2, backing.length - 4)
+    const makeResponse = () => new Response(new ReadableStream({
+      start (controller) {
+        controller.enqueue(chunk)
+        controller.close()
+      }
+    }))
+
+    t.assert.strictEqual(await makeResponse().text(), '{"foo":"bar"}')
+    t.assert.deepStrictEqual(await makeResponse().json(), { foo: 'bar' })
+
+    const bytes = await makeResponse().bytes()
+    t.assert.deepStrictEqual(bytes, new Uint8Array(chunk))
+    t.assert.notStrictEqual(bytes.buffer, chunk.buffer)
+
+    const arrayBuffer = await makeResponse().arrayBuffer()
+    t.assert.deepStrictEqual(new Uint8Array(arrayBuffer), new Uint8Array(chunk))
+    t.assert.notStrictEqual(arrayBuffer, chunk.buffer)
+  })
 })
 
 // https://github.com/nodejs/undici/issues/2465

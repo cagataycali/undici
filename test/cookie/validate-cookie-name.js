@@ -127,4 +127,19 @@ describe('validateCookieName', () => {
     strictEqual(validateCookieName('z'), undefined)
     strictEqual(validateCookieName('!'), undefined)
   })
+
+  test('should accept exactly the RFC 6265 / RFC 7230 token characters', () => {
+    // separators, CTLs, SP, HT, DEL and anything outside US-ASCII are rejected
+    const separators = '()<>@,;:\\"/[]?={} \t'
+    for (let code = 0; code <= 0xFFFF; ++code) {
+      const char = String.fromCharCode(code)
+      const expected = code > 0x20 && code < 0x7F && !separators.includes(char)
+      if (expected) {
+        strictEqual(validateCookieName(`a${char}b`), undefined, `code ${code}`)
+      } else {
+        throws(() => validateCookieName(`a${char}b`), new Error('Invalid cookie name'), `code ${code}`)
+      }
+    }
+    strictEqual(validateCookieName(''), undefined)
+  })
 })

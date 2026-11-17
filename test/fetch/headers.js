@@ -324,6 +324,19 @@ test('Headers forEach', async (t) => {
       t.assert.strictEqual(this, thisArg)
     }, thisArg)
   })
+
+  await t.test('observes changes made by the callback', (t) => {
+    const headers = new Headers([['a', '1'], ['b', '2'], ['c', '3']])
+    const seen = []
+    headers.forEach((value, key) => {
+      seen.push([key, value])
+      if (key === 'a') {
+        headers.delete('b')
+        headers.append('d', '4')
+      }
+    })
+    t.assert.deepStrictEqual(seen, [['a', '1'], ['c', '3'], ['d', '4']])
+  })
 })
 
 test('Headers as Iterable', async (t) => {

@@ -49,3 +49,41 @@ The only theoretical difference: if user code inside an element's `toString()` r
 spec, which reads `next` once (IteratorRecord). Also, `Function.prototype.bind` is no longer called.
 
 AI assistance: this change was researched and drafted with AI (tiny / Claude) and reviewed by the author.
+
+## Re-verified (rotated load order)
+
+Re-run 2026-11-17 after finding that in one process the last-loaded undici copy can run 20–30% slower whatever its code. A and A' are two separate extracted copies of base `e2d3523b`, B is this branch. Each load order runs in its own process (3 orders × 2 processes, 9 alternating rounds × 50k ops, median ns/op), under the bench lock (loadavg 5.9). Node v26.13.0, darwin arm64. Patched is faster in all 18 order/size runs. The gain matches the original −9–13%.
+
+### new Headers(1 pairs)
+| order | A (base) | A' (base copy) | B (patch) | A'/A | B/A |
+|---|---|---|---|---|---|
+| A,B,A2 | 187.7 | 187.2 | 166.3 | -0.3% | -11.4% |
+| A,B,A2 | 212.9 | 202.8 | 186.0 | -4.7% | -12.6% |
+| B,A2,A | 216.2 | 218.5 | 203.6 | +1.1% | -5.8% |
+| B,A2,A | 197.7 | 200.5 | 182.1 | +1.4% | -7.9% |
+| A2,A,B | 278.3 | 276.6 | 247.2 | -0.6% | -11.2% |
+| A2,A,B | 221.6 | 225.3 | 199.8 | +1.7% | -9.8% |
+| **geo-mean over orders** | | | | **-0.3%** | **-9.7%** vs mean(A,A') |
+
+### new Headers(8 pairs)
+| order | A (base) | A' (base copy) | B (patch) | A'/A | B/A |
+|---|---|---|---|---|---|
+| A,B,A2 | 1318.1 | 1296.6 | 1170.3 | -1.6% | -11.2% |
+| A,B,A2 | 1267.1 | 1287.0 | 1164.5 | +1.6% | -8.1% |
+| B,A2,A | 1487.7 | 1432.8 | 1327.3 | -3.7% | -10.8% |
+| B,A2,A | 1268.8 | 1278.9 | 1172.9 | +0.8% | -7.6% |
+| A2,A,B | 1650.6 | 1713.0 | 1439.8 | +3.8% | -12.8% |
+| A2,A,B | 1337.5 | 1412.7 | 1206.2 | +5.6% | -9.8% |
+| **geo-mean over orders** | | | | **+1.0%** | **-10.5%** vs mean(A,A') |
+
+### new Headers(32 pairs)
+| order | A (base) | A' (base copy) | B (patch) | A'/A | B/A |
+|---|---|---|---|---|---|
+| A,B,A2 | 5350.2 | 5310.7 | 4843.3 | -0.7% | -9.5% |
+| A,B,A2 | 5071.9 | 5247.2 | 4721.7 | +3.5% | -6.9% |
+| B,A2,A | 6749.8 | 6918.8 | 6294.2 | +2.5% | -6.8% |
+| B,A2,A | 5043.7 | 5123.8 | 4675.3 | +1.6% | -7.3% |
+| A2,A,B | 5062.3 | 5286.2 | 4617.6 | +4.4% | -8.8% |
+| A2,A,B | 5224.1 | 5345.6 | 4791.9 | +2.3% | -8.3% |
+| **geo-mean over orders** | | | | **+2.2%** | **-8.9%** vs mean(A,A') |
+

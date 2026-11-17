@@ -37,3 +37,38 @@ failure set as origin/main (environment-only: tests needing `--expose-gc`, bundl
 WPT not runnable locally (requires /etc/hosts entries / sudo); behaviour equivalence shown by the exhaustive check.
 
 AI assistance: this change was researched and drafted with AI (tiny / Claude) and reviewed by the author.
+
+## End-to-end validation
+
+(Owner review only — full details in work/top5/DEEP-P03.md. Branch rebased on origin/main 3d170a33.)
+
+**Prior art — read first:** this is the same change as nodejs/undici#5903 (@zirkelc, closed unmerged 2026-09-25). It was closed over the
+"AI campaign" methodology, not the code. @jasnell called the change "worth taking" and suggested `buffer.isLatin1` (nodejs/node#66298, Node ≥26 only) + regex fallback.
+A fresh PR would be a duplicate: refer to #5903, credit it, and ask maintainers first.
+
+**Node matrix** (separate processes, main/branch alternated, 4 rounds, median ns/op):
+
+| case | Node 22.23.5 | Node 24.22.3 | Node 26.13.0 |
+|---|---|---|---|
+| ByteString short (12) | 12.9 → 8.1 (1.58×) | 12.5 → 7.7 (1.62×) | 13.9 → 7.7 (1.80×) |
+| ByteString long (113) | 97.6 → 10.4 (9.4×) | 96.6 → 9.3 (10.4×) | 93.9 → 9.5 (9.9×) |
+| ByteString latin1 (76) | 93.8 → 12.4 (7.6×) | 103.1 → 12.5 (8.3×) | 101.1 → 12.2 (8.3×) |
+| `new Headers()` + 8× append | 875 → 654 (1.34×) | 832 → 602 (1.38×) | 784 → 559 (1.40×) |
+| `headers.set()` | 163 → 69 (2.35×) | 148 → 65 (2.27×) | 147 → 64 (2.29×) |
+
+There's no regression on any supported Node version; branch max < main min in every row.
+
+**End-to-end** (full library, separate processes, 12 ABBA rounds × 3 s, 16 concurrent, local upstream with 20 response headers, loadavg ~4.1):
+
+| workload | Δ req/s (paired mean) | 95% bootstrap CI | Δ CPU µs/req | 95% CI |
+|---|---|---|---|---|
+| fetch proxy (8 append → fetch → new Headers(res.headers) → delete/set/append → forEach → new Response) | +0.50% | [−0.85%, +1.64%] | −0.25% | [−1.30%, +1.06%] |
+| plain fetch() + iterate 20 headers | −2.24% | [−6.23%, +1.76%] | +2.40% | [−0.45%, +5.76%] |
+
+Neither is statistically significant. Plain fetch makes ~1 ByteString call per request, so this change can't move it; that row is noise.
+
+**CPU profile** (proxy workload, `--cpu-prof`, with and without inlining): `webidl.converters.ByteString` takes **1.0–1.2%** of busy CPU on main and **0.44–0.55%** on the branch (including the regex), saving ~0.6% CPU/request.
+The rest of the top-10 is GC, latin1 encode/decode, `HeadersList.append`, the header-name tree search, `parseHeaders` and `isValidHeaderValue`.
+
+**Verdict: OK.** It's a big micro-level win on every supported Node, the diff is small and spec-shaped, and there's no behaviour change. The end-to-end effect is ≤1% and only matters for header-heavy fetch code.
+Upstream should get it as a revival of #5903, ideally in jasnell's `isLatin1`+regex form, not as a new PR.

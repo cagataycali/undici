@@ -65,3 +65,34 @@ test('Frames are masked correctly for every payload length remainder', (t) => {
     t.assert.deepStrictEqual(unmask(head, headerLength, length, body), payload)
   }
 })
+
+test('Frames are masked correctly for long payloads at every byte alignment', (t) => {
+  const { randomBytes } = require('node:crypto')
+
+  function unmask (mask, body, payloadLength) {
+    const out = Buffer.allocUnsafe(payloadLength)
+    for (let i = 0; i < payloadLength; ++i) {
+      out[i] = body[i] ^ mask[i & 3]
+    }
+    return out
+  }
+
+  for (const length of [255, 256, 257, 258, 259, 260, 1021, 4096, 65537]) {
+    for (let shift = 0; shift < 4; ++shift) {
+      const backing = randomBytes(length + 8)
+      const payload = backing.subarray(shift, shift + length)
+      const expected = Buffer.from(payload)
+      const headerLength = length > 65535 ? 10 : length > 125 ? 4 : 2
+
+      const frame = new WebsocketFrameSend(payload).createFrame(opcodes.BINARY)
+      const mask = frame.subarray(headerLength, headerLength + 4)
+      t.assert.deepStrictEqual(unmask(mask, frame.subarray(headerLength + 4), length), expected)
+      t.assert.deepStrictEqual(payload, expected) // source is not modified
+
+      const text = Buffer.from(backing).subarray(shift, shift + length)
+      const [head, body] = WebsocketFrameSend.createFastTextFrame(text)
+      t.assert.strictEqual(body, text)
+      t.assert.deepStrictEqual(unmask(head.subarray(headerLength, headerLength + 4), body, length), expected)
+    }
+  }
+})

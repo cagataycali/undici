@@ -26,8 +26,10 @@ Node v26.13.0, Apple M5 Pro (15 cores), macOS. Mean of 5 runs (min–max):
 | 4 MiB   | 458.7 µs (446.3–492.5) | 360.0 µs (345.7–371.3) | −21.5 % |
 | 512 B / 8 KiB | unchanged within noise (4 runs: 1.47 vs 1.49 µs; 3.08 vs 3.10 µs) | | 0 % |
 
-Bodies below 4 KiB take the old path (pooled), so they are unaffected by design. The 8 KiB
-case is not pooled but the copy is too small to stand out from the stream overhead.
+Bodies that `Buffer.concat()` places in Node's shared pool take the old path, so they are unaffected
+by design. That is any size below `Buffer.poolSize >>> 1`: 4 KiB on Node 22 (poolSize 8 KiB), 32 KiB on
+Node 24 and 26 (poolSize 64 KiB). The guard checks ownership, not size, so it stays correct if an
+application changes `Buffer.poolSize`.
 
 ## Tests
 

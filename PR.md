@@ -84,18 +84,7 @@ neutral, so it is not a regression of this PR:
 | v26.13.0 | text64 | 58.0 (57.2–66.6) | 58.8 (58.5–66.4) | 58.0 (57.8–66.4) | 0.99x | 1.00x |
 | v26.13.0 | bin64 | 72.5 (64.3–76.0) | 55.5 (53.5–64.3) | 54.2 (53.2–61.8) | 1.31x | 1.34x |
 
-**End-to-end (first commit only, re-run pending)** `node benchmarks/websocket-benchmark.mjs` (256 KiB echo round trips, 9 interleaved runs each;
-median msgs/s). The bundled `websocket-echo-server.mjs` (uWebSockets.js) failed to load on Node 26 locally
-(package missing `index.js`), so a minimal single-threaded `ws` echo server on :8080 was used for both arms.
-The machine was shared (load avg ~7), so treat these as indicative:
-
-| Case | baseline | patched | median ratio |
-|---|---|---|---|
-| undici [binary] | 2385 /s (sd 186) | 3522 /s (sd 763) | 1.48× |
-| undici [string] | 2671 /s (sd 165) | 3296 /s (sd 849) | 1.23× |
-| undici - stream [binary] | 2471 /s (sd 189) | 3496 /s (sd 664) | 1.41× |
-| undici - stream [string] | 2408 /s (sd 220) | 3374 /s (sd 504) | 1.40× |
-
+(End-to-end results: see "End-to-end validation" below.)
 
 ## Tests
 
@@ -113,3 +102,146 @@ Breaking changes: none. Internal change to `lib/web/websocket/frame.js` only: sa
 same frame bytes, same random-pool usage, no API, option, type or dependency change; works on Node ≥ 22.19 (tested 22/24/26).
 
 AI assistance: this change was researched and drafted with AI (tiny / Claude) and reviewed by the author.
+
+## End-to-end validation
+
+**Upstream status — read first.** Maintainer PR [#5971](https://github.com/nodejs/undici/pull/5971) (tsctx, open, approved)
+moves masking to Node's native `http.websocketMask` (Node 26.x) with a 4-bytes-per-step JS fallback. Same-idea PRs
+[#5809](https://github.com/nodejs/undici/pull/5809) and [#5902](https://github.com/nodejs/undici/pull/5902) were closed (no
+benchmarks / duplicate). On Node 26 the native helper is 1.4–5× faster than this branch's 32-bit path. This branch's unique
+value is the **fallback on Node 22/24** (no builtin), where the 32-bit path is 2–4.6× faster than #5971's fallback. Do NOT open
+this as a competing PR; at most offer `applyMaskWords` as the fallback for #5971 (owner decision).
+
+**Workload:** undici `WebSocket` client (Node 26.13.0) ping-pong echo against a local single-threaded uWebSockets.js 20.71.0
+server (`ws://127.0.0.1:8089`), 64 B / 1 KiB / 16 KiB / 256 KiB, Buffer (`createFrame`) and string (`createFastTextFrame`) sends,
+1.2 s per case after 0.3 s warm-up. main (3d170a33) and branch as **separate processes**, 10 runs each, order alternated, via the
+machine-wide bench lock (loadavg 2.67 3.40 3.77). Client CPU = `process.cpuUsage()` user+sys per message.
+Stats: median, p95 of per-process values, bootstrap (10 000 resamples) 95% CI of the median ratio.
+Note: `benchmarks/websocket-echo-server.mjs` cannot load uWebSockets.js 20.71.0 via `import` on any Node version (the package's
+`ESM_wrapper.mjs` imports a non-existent `./index.js`); the native addon itself loads on Node 26, so the server used `require()`.
+
+n = 10 main / 10 branch processes
+
+| case | metric | main median (p95) | branch median (p95) | Δ median | 95% CI (bootstrap) | real? |
+|---|---|---|---|---|---|---|
+| bin64 | msgs/s | 56683.3 (64916.4) | 59804.8 (63995.4) | +5.5% | [-8.0%, +11.9%] | no (CI spans 0) |
+| bin64 | client CPU µs/msg | 8.6 (10.1) | 8.1 (9.3) | -5.4% | [-11.8%, +11.0%] | no (CI spans 0) |
+| str64 | msgs/s | 55531.6 (60523.5) | 54891.4 (63250.6) | -1.2% | [-7.0%, +10.0%] | no (CI spans 0) |
+| str64 | client CPU µs/msg | 8.8 (9.6) | 8.9 (9.8) | +1.8% | [-10.4%, +9.6%] | no (CI spans 0) |
+| bin1024 | msgs/s | 50119.1 (52948.7) | 53072.6 (56669.1) | +5.9% | [+2.6%, +13.4%] | yes |
+| bin1024 | client CPU µs/msg | 9.9 (11.6) | 9.1 (9.5) | -8.3% | [-16.6%, -4.5%] | yes |
+| str1024 | msgs/s | 48727.2 (52523.6) | 51965.0 (53465.5) | +6.6% | [-0.1%, +12.3%] | no (CI spans 0) |
+| str1024 | client CPU µs/msg | 10.4 (11.5) | 9.5 (10.7) | -8.6% | [-13.3%, -1.7%] | yes |
+| bin16384 | msgs/s | 23758.8 (27057.1) | 34022.6 (36401.2) | +43.2% | [+31.1%, +53.4%] | yes |
+| bin16384 | client CPU µs/msg | 37.1 (62.5) | 23.3 (44.2) | -37.3% | [-50.9%, -20.6%] | yes |
+| str16384 | msgs/s | 24985.6 (27097.7) | 29816.2 (33565.3) | +19.3% | [+12.1%, +30.2%] | yes |
+| str16384 | client CPU µs/msg | 31.0 (39.9) | 29.2 (30.2) | -5.9% | [-25.2%, +22.1%] | no (CI spans 0) |
+| bin262144 | msgs/s | 3305.9 (3860.7) | 7435.6 (8331.3) | +124.9% | [+105.1%, +134.4%] | yes |
+| bin262144 | client CPU µs/msg | 330.0 (341.2) | 158.9 (163.4) | -51.8% | [-53.4%, -48.1%] | yes |
+| str262144 | msgs/s | 3501.9 (4199.2) | 6182.8 (6788.8) | +76.6% | [+55.0%, +95.0%] | yes |
+| str262144 | client CPU µs/msg | 298.0 (318.6) | 180.2 (188.0) | -39.5% | [-43.2%, -35.2%] | yes |
+
+Statistically real from 1 KiB up (binary 16 KiB: +43% msgs/s, −37% CPU/msg; 256 KiB: 2.25× msgs/s, −52% CPU/msg);
+64 B shows no detectable difference either way.
+
+**CPU profile** (`node --cpu-prof`, client process, same workload; self-time % of non-idle samples):
+
+#### p02-main-1024 — busy 937 ms of 6642 ms (self-time % of non-idle)
+| # | function | self % |
+|---|---|---|
+| 1 | `writev` | 23.2% |
+| 2 | `writeBuffer` | 19.6% |
+| 3 | `(program)` | 16.0% |
+| 4 | `createFrame frame.js:31` | 4.0% |
+| 5 | `createFastTextFrame frame.js:84` | 3.5% |
+| 6 | `(garbage collector)` | 2.7% |
+| 7 | `FastBuffer buffer:962` | 2.5% |
+| 8 | `runMicrotasks` | 2.5% |
+| 9 | `toArrayBuffer util.js:87` | 2.1% |
+| 10 | `(anon) client.mjs:1` | 1.8% |
+
+masking/frame-build functions (createFrame, createFastTextFrame, applyMask*, writeMask, generateMask) total self: 7.8%
+
+#### p02-main-16384 — busy 3677 ms of 6645 ms (self-time % of non-idle)
+| # | function | self % |
+|---|---|---|
+| 1 | `createFrame frame.js:31` | 40.4% |
+| 2 | `createFastTextFrame frame.js:84` | 29.4% |
+| 3 | `(garbage collector)` | 9.6% |
+| 4 | `(program)` | 4.4% |
+| 5 | `writev` | 3.3% |
+| 6 | `writeBuffer` | 2.9% |
+| 7 | `(anon)` | 2.0% |
+| 8 | `toArrayBuffer util.js:87` | 0.8% |
+| 9 | `decode encoding:481` | 0.5% |
+| 10 | `FastBuffer buffer:962` | 0.5% |
+
+masking/frame-build functions (createFrame, createFastTextFrame, applyMask*, writeMask, generateMask) total self: 69.9%
+
+#### p02-main-262144 — busy 3535 ms of 6647 ms (self-time % of non-idle)
+| # | function | self % |
+|---|---|---|
+| 1 | `createFrame frame.js:31` | 35.0% |
+| 2 | `createFastTextFrame frame.js:84` | 28.4% |
+| 3 | `writeBuffer` | 8.7% |
+| 4 | `writev` | 5.2% |
+| 5 | `(garbage collector)` | 5.0% |
+| 6 | `(anon)` | 3.9% |
+| 7 | `(program)` | 3.6% |
+| 8 | `consume receiver.js:333` | 2.2% |
+| 9 | `decode encoding:481` | 1.7% |
+| 10 | `decodeUTF8` | 1.1% |
+
+masking/frame-build functions (createFrame, createFastTextFrame, applyMask*, writeMask, generateMask) total self: 63.4%
+
+#### websocket-mask-unrolled-1024 — busy 793 ms of 6650 ms (self-time % of non-idle)
+| # | function | self % |
+|---|---|---|
+| 1 | `writev` | 21.6% |
+| 2 | `(program)` | 20.9% |
+| 3 | `writeBuffer` | 15.6% |
+| 4 | `(garbage collector)` | 4.2% |
+| 5 | `FastBuffer buffer:962` | 3.8% |
+| 6 | `toArrayBuffer util.js:87` | 2.3% |
+| 7 | `(anon) client.mjs:1` | 2.1% |
+| 8 | `applyMaskWords frame.js:85` | 2.0% |
+| 9 | `runMicrotasks` | 1.9% |
+| 10 | `processTicksAndRejections task_queues:72` | 1.5% |
+
+masking/frame-build functions (createFrame, createFastTextFrame, applyMask*, writeMask, generateMask) total self: 2.4%
+
+#### websocket-mask-unrolled-16384 — busy 3014 ms of 6647 ms (self-time % of non-idle)
+| # | function | self % |
+|---|---|---|
+| 1 | `writev` | 24.7% |
+| 2 | `writeBuffer` | 21.6% |
+| 3 | `applyMaskWords frame.js:85` | 14.3% |
+| 4 | `(garbage collector)` | 13.2% |
+| 5 | `(program)` | 5.5% |
+| 6 | `(anon)` | 2.5% |
+| 7 | `runMicrotasks` | 2.0% |
+| 8 | `(anon) client.mjs:1` | 1.0% |
+| 9 | `toArrayBuffer util.js:87` | 1.0% |
+| 10 | `createUnsafeAlignedBuffer buffer:1132` | 0.9% |
+
+masking/frame-build functions (createFrame, createFastTextFrame, applyMask*, writeMask, generateMask) total self: 14.8%
+
+#### websocket-mask-unrolled-262144 — busy 2451 ms of 6653 ms (self-time % of non-idle)
+| # | function | self % |
+|---|---|---|
+| 1 | `applyMaskWords frame.js:85` | 21.0% |
+| 2 | `(garbage collector)` | 19.5% |
+| 3 | `(program)` | 12.3% |
+| 4 | `writev` | 8.6% |
+| 5 | `writeBuffer` | 8.0% |
+| 6 | `consume receiver.js:333` | 7.4% |
+| 7 | `(anon)` | 6.7% |
+| 8 | `decode encoding:481` | 3.8% |
+| 9 | `decodeUTF8` | 2.2% |
+| 10 | `createUnsafeBuffer buffer:1108` | 1.4% |
+
+masking/frame-build functions (createFrame, createFastTextFrame, applyMask*, writeMask, generateMask) total self: 21.0%
+
+Frame build/masking goes from the #1/#2 hottest functions (63–70% of client CPU at ≥16 KiB) to 15–21%; socket writes become the top cost.
+
+**Node matrix:** see the Benchmarks section (22.23.5 / 24.22.3 / 26.13.0, all faster except 64 B text, which is neutral when isolated).

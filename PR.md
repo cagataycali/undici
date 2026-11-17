@@ -10,6 +10,10 @@ would store every entry unchanged (valid lowercase-stored name, already-normaliz
 and copies the entries into a new map at the same time. If any entry would be changed or rejected
 (e.g. response headers from the network with trailing whitespace, or entries added by an interceptor), it returns
 `null` and the existing path runs, so results and errors stay exactly the same.
+Update: when an entry would be changed or rejected (e.g. a response header with trailing whitespace, which llhttp
+keeps), the entries already copied are kept (they are exactly what `fill()` would have appended, in the same order) and
+only the remaining entries go through `appendHeader`, so such a list is still faster than `main` instead of paying for
+the fast path and then the full slow path (worst case was 1.6× slower before this change).
 `Symbol.iterator` is still read exactly once (the `HeadersInit` conversion now takes the already-read iterator).
 
 ## Benchmarks

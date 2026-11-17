@@ -839,6 +839,39 @@ test('new Headers(headers) copies the header list', async (t) => {
     t.assert.throws(() => new Headers(invalidValue), TypeError)
   })
 
+  await t.test('normalizes entries after valid ones, as fill() does', (t) => {
+    // Built the way fetch() stores response headers: valid entries first,
+    // then one with trailing whitespace, then more (including a key that
+    // merges into an earlier entry once lowercased).
+    const source = new Headers()
+    const list = getHeadersList(source)
+    list.append('content-type', 'text/html', true)
+    list.append('set-cookie', 'a=1', true)
+    list.append('x-trailing', 'value  ', true)
+    list.append('set-cookie', 'b=2 ', true)
+    list.append('Content-Type', 'charset=utf-8', true)
+    list.append('vary', 'origin', true)
+
+    const copy = new Headers(source)
+    t.assert.deepStrictEqual([...copy], [
+      ['content-type', 'text/html, charset=utf-8'],
+      ['set-cookie', 'a=1'],
+      ['set-cookie', 'b=2'],
+      ['vary', 'origin'],
+      ['x-trailing', 'value']
+    ])
+    t.assert.deepStrictEqual(copy.getSetCookie(), ['a=1', 'b=2'])
+    // the source is left untouched
+    t.assert.strictEqual(list.get('x-trailing', true), 'value  ')
+    t.assert.deepStrictEqual(source.getSetCookie(), ['a=1', 'b=2 '])
+
+    const invalidLater = new Headers()
+    getHeadersList(invalidLater).append('x-a', '1', true)
+    getHeadersList(invalidLater).append('x-b', ' 2', true)
+    getHeadersList(invalidLater).append('x-c', 'a\0b', true)
+    t.assert.throws(() => new Headers(invalidLater), TypeError)
+  })
+
   await t.test('copies immutable headers into a mutable object', (t) => {
     const source = new Headers([['x-a', '1']])
     setHeadersGuard(source, 'immutable')

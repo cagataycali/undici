@@ -2524,3 +2524,37 @@ test('Should handle a 1xx response before the final response', async t => {
   t.equal(response.status, 200)
   t.equal(await response.text(), 'ok')
 })
+
+test('Should resolve each origin to its own address when the resolved origin is reused', t => {
+  const { strictEqual } = tspl(t, { plan: 8 })
+  const records = {
+    'a.test': [{ address: '127.0.0.1', family: 4, ttl: 1e9 }],
+    'b.test': [{ address: '::1', family: 6, ttl: 1e9 }],
+    'c.test': [{ address: '127.0.0.2', family: 4, port: 4000, ttl: 1e9 }]
+  }
+  const seen = []
+  const dispatch = dns({
+    lookup: (origin, opts, cb) => cb(null, records[origin.hostname])
+  })(opts => {
+    seen.push(opts)
+    return true
+  })
+  const handler = { onResponseError (controller, err) { throw err } }
+
+  for (let i = 0; i < 2; i++) {
+    dispatch({ origin: 'http://a.test:3000', path: '/', method: 'GET' }, handler)
+    dispatch({ origin: 'http://a.test:3001', path: '/', method: 'GET' }, handler)
+    dispatch({ origin: 'https://b.test', path: '/', method: 'GET' }, handler)
+    dispatch({ origin: 'http://c.test:3000', path: '/', method: 'GET' }, handler)
+  }
+
+  const origins = seen.map(opts => `${opts.origin} ${opts.headers.host}`)
+  strictEqual(origins[0], 'http://127.0.0.1:3000 a.test:3000')
+  strictEqual(origins[1], 'http://127.0.0.1:3001 a.test:3001')
+  strictEqual(origins[2], 'https://[::1] b.test')
+  strictEqual(origins[3], 'http://127.0.0.2:4000 c.test:3000')
+  strictEqual(origins[4], origins[0])
+  strictEqual(origins[5], origins[1])
+  strictEqual(origins[6], origins[2])
+  strictEqual(origins[7], origins[3])
+})

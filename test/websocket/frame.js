@@ -37,3 +37,31 @@ test('Writing 16-bit frame length value at correct offset when buffer has a non-
   t.assert.strictEqual(frame[3], payloadLength & 0xff)
   t.assert.strictEqual(smallBuffer.length, 1) // ensure smallBuffer can't be garbage-collected too soon
 })
+
+test('Frames are masked correctly for every payload length remainder', (t) => {
+  const { randomBytes } = require('node:crypto')
+
+  function unmask (frame, headerLength, payloadLength, body = frame.subarray(headerLength + 4)) {
+    const mask = frame.subarray(headerLength, headerLength + 4)
+    const out = Buffer.allocUnsafe(payloadLength)
+    for (let i = 0; i < payloadLength; ++i) {
+      out[i] = body[i] ^ mask[i & 3]
+    }
+    return out
+  }
+
+  for (const length of [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 125, 126, 127, 1023, 65535, 65536, 65539]) {
+    const payload = randomBytes(length)
+    const headerLength = length > 65535 ? 10 : length > 125 ? 4 : 2
+
+    const frame = new WebsocketFrameSend(payload).createFrame(opcodes.BINARY)
+    t.assert.strictEqual(frame.length, headerLength + 4 + length)
+    t.assert.deepStrictEqual(unmask(frame, headerLength, length), payload)
+
+    const text = Buffer.from(payload)
+    const [head, body] = WebsocketFrameSend.createFastTextFrame(text)
+    t.assert.strictEqual(head.length, headerLength + 4)
+    t.assert.strictEqual(body, text)
+    t.assert.deepStrictEqual(unmask(head, headerLength, length, body), payload)
+  }
+})

@@ -52,3 +52,40 @@ Breaking changes: none. The fast path only runs when `fill()` would store every 
 those entries; in every other case the existing code runs, so the API, results, errors, header casing and order are unchanged.
 
 AI assistance: this change was researched and drafted with AI (tiny / Claude) and reviewed by the author.
+
+## End-to-end validation
+
+Rebased on origin/main `3d170a33`. All runs: separate processes (one undici tree per process), order alternated, machine-wide
+benchmark lock, macOS / Apple M5 Pro, loadavg ≈ 4–5.
+
+**Node matrix** (`new Headers(headers)` micro-benchmark, median of 3 runs, ns):
+
+| Node | 8 mixed-case | 16 lowercase | 8 with 3 set-cookie | empty |
+|---|---|---|---|---|
+| 22.23.5 | 664 → 438 (1.52×) | 1236 → 822 (1.50×) | 520 → 321 (1.62×) | 27 → 29 |
+| 24.22.3 | 672 → 406 (1.65×) | 1108 → 712 (1.56×) | 508 → 272 (1.87×) | 27 → 30 |
+| 26.13.0 | 647 → 348 (1.86×) | 1018 → 640 (1.59×) | 455 → 260 (1.75×) | 29 → 31 |
+
+Copying an empty `Headers` is a few ns slower (the extra checks cost more than they save on 0 entries).
+
+**Real responses.** How often the copy is taken for a `fetch()` response (counter in a throwaway copy): 40/40 popular sites/APIs/CDNs
+over HTTPS and 100% of `benchmarks/server.js` responses. Case, duplicates, `set-cookie`, empty values and latin1 bytes all keep the copy.
+A header value with trailing whitespace (llhttp keeps it) cannot be copied as is; from that entry on, the remaining entries go through
+`appendHeader`, so 24 CDN headers with one such value last are still 1.6× faster than main, and ≈ main when it is first.
+A random differential (1M header-list shapes built through the internal list, incl. upper-case keys, whitespace, NUL/CR/LF, invalid
+names, cookies) gives identical lists, iteration results and errors on main and on this branch.
+
+**End to end.** Local `node:http` server (24 CDN-style headers, 2 KiB body, keep-alive), 16 concurrent requests, 40 000 per run,
+12 paired runs per side. Δ = median of paired differences, bootstrap 95% CI.
+
+| workload | metric | main | branch | Δ | 95% CI |
+|---|---|---|---|---|---|
+| proxy: fetch → `new Headers(res.headers)` → set/append/delete → forEach → `new Response` | req/s | 22 564 | 23 063 | +2.3% | [+2.1%, +3.6%] |
+| | CPU µs/req | 68.9 | 68.2 | −1.4% | [−2.1%, −0.9%] |
+| | p50 / p95 µs | 608 / 1745 | 596 / 1709 | −2.1% / −1.8% | both < 0 |
+| plain fetch (does not reach this code; control) | req/s | 26 882 | 26 769 | −0.6% | [−1.6%, +0.7%] |
+
+CPU profile of the proxy workload: `new Headers(res.headers)` goes from 5.78% to 3.03% of client CPU (inclusive).
+
+Related upstream: #5699 also clones the list in `new Headers(headers)` as part of a larger rewrite, but without re-normalizing, so
+values with trailing whitespace would stay un-normalized; this change keeps the result identical to `fill()`.

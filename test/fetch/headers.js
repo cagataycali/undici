@@ -1,7 +1,7 @@
 'use strict'
 
 const { test } = require('node:test')
-const { Headers, fill, setHeadersGuard } = require('../../lib/web/fetch/headers')
+const { Headers, fill, setHeadersGuard, getHeadersList } = require('../../lib/web/fetch/headers')
 const { once } = require('node:events')
 const { fetch } = require('../..')
 const { createServer } = require('node:http')
@@ -777,4 +777,79 @@ test('Invalid key/value records passed to constructor (issue #3829)', (t) => {
     () => new Headers({ 'x-fake-header': Symbol('why is this here?') }),
     new TypeError('Headers constructor: init["x-fake-header"] is a symbol, which cannot be converted to a ByteString.')
   )
+})
+
+test('new Headers(headers) copies the header list', async (t) => {
+  await t.test('keeps names, order, combined values and cookies', (t) => {
+    const source = new Headers([
+      ['Content-Type', 'text/plain'],
+      ['X-Dup', '1'],
+      ['x-dup', '2'],
+      ['Set-Cookie', 'a=1'],
+      ['set-cookie', 'b=2'],
+      ['Cookie', 'c=3'],
+      ['cookie', 'd=4']
+    ])
+    const entries = [...source] // also populates the sorted cache of the source
+
+    const copy = new Headers(source)
+
+    t.assert.deepStrictEqual([...copy], entries)
+    t.assert.deepStrictEqual(copy.getSetCookie(), ['a=1', 'b=2'])
+    t.assert.deepStrictEqual(
+      [...getHeadersList(copy).headersMap],
+      [...getHeadersList(source).headersMap]
+    )
+  })
+
+  await t.test('copy and source are independent', (t) => {
+    const source = new Headers([['set-cookie', 'a=1'], ['x-a', '1']])
+    t.assert.strictEqual([...source].length, 2)
+    const copy = new Headers(source)
+
+    copy.append('set-cookie', 'b=2')
+    copy.set('x-a', '2')
+    copy.append('x-b', '3')
+    source.delete('x-a')
+
+    t.assert.deepStrictEqual([...source], [['set-cookie', 'a=1']])
+    t.assert.deepStrictEqual(source.getSetCookie(), ['a=1'])
+    t.assert.deepStrictEqual(
+      [...copy],
+      [['set-cookie', 'a=1'], ['set-cookie', 'b=2'], ['x-a', '2'], ['x-b', '3']]
+    )
+  })
+
+  await t.test('still normalizes and validates entries added internally', (t) => {
+    const whitespace = new Headers()
+    getHeadersList(whitespace).append('x-a', ' foo \t', true)
+    getHeadersList(whitespace).append('set-cookie', 'a=1 ', true)
+    t.assert.deepStrictEqual([...new Headers(whitespace)], [['set-cookie', 'a=1'], ['x-a', 'foo']])
+
+    const upperCaseKey = new Headers()
+    getHeadersList(upperCaseKey).append('X-A', '1', true)
+    t.assert.deepStrictEqual([...new Headers(upperCaseKey)], [['x-a', '1']])
+
+    const invalidName = new Headers()
+    getHeadersList(invalidName).append('x a', '1', true)
+    t.assert.throws(() => new Headers(invalidName), TypeError)
+
+    const invalidValue = new Headers()
+    getHeadersList(invalidValue).append('x-a', 'a\0b', true)
+    t.assert.throws(() => new Headers(invalidValue), TypeError)
+  })
+
+  await t.test('copies immutable headers into a mutable object', (t) => {
+    const source = new Headers([['x-a', '1']])
+    setHeadersGuard(source, 'immutable')
+    const copy = new Headers(source)
+    copy.append('x-b', '2')
+    t.assert.deepStrictEqual([...copy], [['x-a', '1'], ['x-b', '2']])
+  })
+
+  await t.test('uses an overridden iterator', (t) => {
+    const source = new Headers([['x-a', '1']])
+    source[Symbol.iterator] = function * () { yield ['x-b', '2'] }
+    t.assert.deepStrictEqual([...new Headers(source)], [['x-b', '2']])
+  })
 })

@@ -162,6 +162,68 @@ describe('getMockDispatch', () => {
     }), dispatch)
   })
 
+  test('it should re-normalize a query path that changed after a lookup', (t) => {
+    t.plan(3)
+    const dispatch = {
+      path: '/path?b=2&a=1',
+      method: 'method',
+      consumed: false
+    }
+
+    t.assert.strictEqual(getMockDispatch([dispatch], {
+      path: '/path?a=1&b=2',
+      method: 'method'
+    }), dispatch)
+
+    dispatch.path = '/other?d=4&c=3'
+    t.assert.throws(() => getMockDispatch([dispatch], {
+      path: '/path?a=1&b=2',
+      method: 'method'
+    }), new MockNotMatchedError('Mock dispatch not matched for path \'/path?a=1&b=2\''))
+    t.assert.strictEqual(getMockDispatch([dispatch], {
+      path: '/other?c=3&d=4',
+      method: 'method'
+    }), dispatch)
+  })
+
+  test('it should match the same query path with and without ignoreTrailingSlash', (t) => {
+    t.plan(3)
+    const dispatch = {
+      path: '/path/?b=2&a=1',
+      method: 'method',
+      consumed: false
+    }
+
+    t.assert.strictEqual(getMockDispatch([dispatch], {
+      path: '/path/?a=1&b=2',
+      method: 'method'
+    }), dispatch)
+
+    dispatch.ignoreTrailingSlash = true
+    t.assert.strictEqual(getMockDispatch([dispatch], {
+      path: '/path?a=1&b=2',
+      method: 'method'
+    }), dispatch)
+
+    dispatch.ignoreTrailingSlash = false
+    t.assert.throws(() => getMockDispatch([dispatch], {
+      path: '/path?a=1&b=2',
+      method: 'method'
+    }), MockNotMatchedError)
+  })
+
+  test('it should skip a dispatch once it is consumed and not add properties to it', (t) => {
+    t.plan(3)
+    const first = { path: '/path?b=2&a=1', method: 'method', consumed: false }
+    const second = { path: '/path?a=1&b=2', method: 'method', consumed: false }
+    const key = { path: '/path?a=1&b=2', method: 'method' }
+
+    t.assert.strictEqual(getMockDispatch([first, second], key), first)
+    first.consumed = true
+    t.assert.strictEqual(getMockDispatch([first, second], key), second)
+    t.assert.deepStrictEqual(Reflect.ownKeys(first), ['path', 'method', 'consumed'])
+  })
+
   test('it should throw if no dispatch matches headers', (t) => {
     t.plan(1)
     const dispatches = [

@@ -122,6 +122,41 @@ describe('webidl.dictionaryConverter', () => {
     assert.deepStrictEqual(dict(obj2), { key: 1 })
   })
 
+  test('member converters receive "<argument>.<key>" as context', () => {
+    const seen = []
+    const record = (V, prefix, argument) => {
+      seen.push(argument)
+      return V
+    }
+
+    const converter = webidl.dictionaryConverter([
+      { key: 'b', converter: record },
+      { key: 'a', converter: record }
+    ])
+
+    converter({ a: 1, b: 2 }, 'prefix', 'init')
+    converter({ a: 1, b: 2 }, 'prefix', 'init')
+    converter({ a: 1, b: 2 }, 'prefix', 'other')
+    converter({ a: 1, b: 2 }, 'prefix')
+
+    // a member getter re-entering the same converter with another argument
+    converter({
+      get a () {
+        converter({ b: 1 }, 'prefix', 'inner')
+        return 1
+      },
+      b: 2
+    }, 'prefix', 'outer')
+
+    assert.deepStrictEqual(seen, [
+      'init.a', 'init.b',
+      'init.a', 'init.b',
+      'other.a', 'other.b',
+      'undefined.a', 'undefined.b',
+      'inner.b', 'outer.a', 'outer.b'
+    ])
+  })
+
   test('keys are accessed in lexicographical order', () => {
     const converter = webidl.dictionaryConverter([
       {

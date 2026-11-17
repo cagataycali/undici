@@ -292,6 +292,20 @@ test('getHeaderByName', (t) => {
   t.assert.strictEqual(getHeaderByName(headers, 'anotherKey'), null)
 })
 
+test('getHeaderByName - record headers are matched case-insensitively, last match wins', (t) => {
+  t.plan(6)
+
+  const headers = { 'X-Foo': 'first', 'x-foo': 'second', Accept: 'json' }
+
+  t.assert.strictEqual(getHeaderByName(headers, 'x-foo'), 'second')
+  t.assert.strictEqual(getHeaderByName(headers, 'X-FOO'), 'second')
+  t.assert.strictEqual(getHeaderByName(headers, 'accept'), 'json')
+  t.assert.strictEqual(getHeaderByName(headers, 'missing'), undefined)
+  // a missing key resolves like a lookup on a plain object (unchanged behaviour)
+  t.assert.strictEqual(getHeaderByName({}, 'constructor'), Object)
+  t.assert.strictEqual(getHeaderByName({ Constructor: 'v' }, 'constructor'), 'v')
+})
+
 describe('buildHeadersFromArray', () => {
   test('it should build headers from array', (t) => {
     t.plan(2)
